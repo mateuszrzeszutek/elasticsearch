@@ -45,7 +45,8 @@ public class MetricValidator {
         "size",
         "utilization",
         "histogram",
-        "time"
+        "time",
+        "duration"
     );
 
     /**
