@@ -40,13 +40,20 @@ public class OtelSdkExportTracerSupplier implements TraceSupplier {
 
     private final Settings settings;
     private final Supplier<MeterProvider> meterProvider;
+    private final Sampler sampler;
     final String authHeader;
     private final Object mutex = new Object();
     private volatile OpenTelemetrySdk openTelemetrySdk;
 
+    // visible for tests
     public OtelSdkExportTracerSupplier(Settings settings, Supplier<MeterProvider> meterProvider) {
+        this(settings, meterProvider, new ElasticTracestateSampler(settings));
+    }
+
+    public OtelSdkExportTracerSupplier(Settings settings, Supplier<MeterProvider> meterProvider, Sampler sampler) {
         this.settings = settings;
         this.meterProvider = meterProvider;
+        this.sampler = sampler;
         this.authHeader = OtelSdkExportMeterSupplier.buildOtlpAuthorizationHeader(settings);
     }
 
@@ -87,7 +94,6 @@ public class OtelSdkExportTracerSupplier implements TraceSupplier {
         }
 
         TimeValue interval = OtelSdkSettings.TELEMETRY_EXPORT_INTERVAL.get(settings);
-        double sampleRate = OtelSdkSettings.TELEMETRY_TRACING_SAMPLE_RATE.get(settings);
         int maxQueueSize = OtelSdkSettings.TELEMETRY_TRACING_MAX_QUEUE_SIZE.get(settings);
         int maxExportBatchSize = OtelSdkSettings.TELEMETRY_TRACING_MAX_BATCH_SIZE.get(settings);
 
@@ -112,9 +118,6 @@ public class OtelSdkExportTracerSupplier implements TraceSupplier {
             .setMaxQueueSize(maxQueueSize)
             .setMaxExportBatchSize(maxExportBatchSize)
             .build();
-
-        // TODO: emit the modern th: tracestate instead of ot=p: once exporting to EDOT gateway
-        Sampler sampler = new ElasticTracestateSampler(sampleRate);
 
         SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
             .setResource(OtelSdkResource.get(settings))
