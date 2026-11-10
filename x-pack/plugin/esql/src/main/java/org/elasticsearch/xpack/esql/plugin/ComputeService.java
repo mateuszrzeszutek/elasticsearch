@@ -2428,7 +2428,7 @@ public class ComputeService {
 
     CancellableTask createGroupTask(Task parentTask, Supplier<String> description) throws TaskCancelledException {
         final TaskManager taskManager = transportService.getTaskManager();
-        try (var ignored = transportService.getThreadPool().getThreadContext().newTraceContext()) {
+        try (var ignored = transportService.getThreadPool().getThreadContext().newStoredContextPreservingResponseHeaders()) {
             return (CancellableTask) taskManager.register(
                 "transport",
                 "esql_compute_group",

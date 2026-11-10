@@ -57,7 +57,10 @@ public class APMTelemetryProvider implements TelemetryProvider {
             apmMeterService::getHealthMeterProvider
         );
         httpServerInstrumentation = new HttpServerInstrumentations(
-            List.of(new HttpServerTracing(apmTracer), new RestRequestMetrics(threadContext, apmMeterService.getMeterRegistry()))
+            List.of(
+                new HttpServerTracing(threadContext, apmTracer),
+                new RestRequestMetrics(threadContext, apmMeterService.getMeterRegistry())
+            )
         );
     }
 
@@ -66,10 +69,11 @@ public class APMTelemetryProvider implements TelemetryProvider {
         this.apmMeterService = apmMeterService;
         this.apmTracer = apmTracer;
         this.loggingService = loggingService;
+        final var threadContext = new ThreadContext(Settings.EMPTY);
         httpServerInstrumentation = new HttpServerInstrumentations(
             List.of(
-                new HttpServerTracing(apmTracer),
-                new RestRequestMetrics(new ThreadContext(Settings.EMPTY), apmMeterService.getMeterRegistry())
+                new HttpServerTracing(threadContext, apmTracer),
+                new RestRequestMetrics(threadContext, apmMeterService.getMeterRegistry())
             )
         );
     }
