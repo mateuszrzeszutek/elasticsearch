@@ -27,10 +27,11 @@ import org.elasticsearch.core.Releasable;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.tasks.Task;
-import org.elasticsearch.telemetry.apm.internal.tracing.APMSpan;
 import org.elasticsearch.telemetry.apm.internal.tracing.APMSpanBuilder;
 import org.elasticsearch.telemetry.apm.internal.tracing.APMTracer;
+import org.elasticsearch.telemetry.apm.internal.tracing.AbstractSpan;
 import org.elasticsearch.telemetry.instrumentation.HttpServerInstrumentation;
+import org.elasticsearch.telemetry.tracing.Span;
 import org.elasticsearch.telemetry.tracing.SpanBuilder;
 
 import java.util.List;
@@ -105,7 +106,7 @@ public class HttpServerTracing implements HttpServerInstrumentation {
     @Override
     public Releasable prepareEnd(RestRequest request, RestResponse response) {
         // the span of the request is the current one when its response is sent, see start(); spans that are not recorded are not current
-        if (tracer.currentSpan() instanceof APMSpan span) {
+        if (tracer.currentSpan() instanceof AbstractSpan span && span.isRecording()) {
             return () -> {
                 setLegacyResponseAttributes(span, response);
 
@@ -127,7 +128,7 @@ public class HttpServerTracing implements HttpServerInstrumentation {
         return () -> {};
     }
 
-    private void setLegacyResponseAttributes(APMSpan span, RestResponse response) {
+    private void setLegacyResponseAttributes(Span span, RestResponse response) {
         span.setAttribute("http.status_code", response.status().getStatus());
         response.getHeaders().forEach((key, values) -> span.setAttribute("http.response.headers." + key, String.join("; ", values)));
     }
