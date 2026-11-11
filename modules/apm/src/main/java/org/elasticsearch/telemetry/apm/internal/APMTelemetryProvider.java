@@ -57,7 +57,7 @@ public class APMTelemetryProvider implements TelemetryProvider {
         );
         httpServerInstrumentation = new HttpServerInstrumentations(
             List.of(
-                new HttpServerTracing(threadContext, tracingService.tracer()),
+                new HttpServerTracing(threadContext, tracingService),
                 new RestRequestMetrics(threadContext, meterService.getMeterRegistry())
             )
         );
@@ -71,15 +71,15 @@ public class APMTelemetryProvider implements TelemetryProvider {
         final var threadContext = new ThreadContext(Settings.EMPTY);
         httpServerInstrumentation = new HttpServerInstrumentations(
             List.of(
-                new HttpServerTracing(threadContext, tracingService.tracer()),
+                new HttpServerTracing(threadContext, tracingService),
                 new RestRequestMetrics(threadContext, meterService.getMeterRegistry())
             )
         );
     }
 
     @Override
-    public Tracer getTracer() {
-        return tracingService.tracer();
+    public Tracer getTracer(String scopeName) {
+        return tracingService.tracer(scopeName);
     }
 
     @Override

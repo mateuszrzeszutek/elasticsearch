@@ -27,6 +27,7 @@ import org.elasticsearch.core.Releasable;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.tasks.Task;
+import org.elasticsearch.telemetry.apm.internal.APMTracingService;
 import org.elasticsearch.telemetry.apm.internal.tracing.APMSpanBuilder;
 import org.elasticsearch.telemetry.apm.internal.tracing.APMTracer;
 import org.elasticsearch.telemetry.apm.internal.tracing.AbstractSpan;
@@ -48,9 +49,9 @@ public class HttpServerTracing implements HttpServerInstrumentation {
     private final AttributesExtractor<RequestAndRoute, RestResponse> httpServerAttributesExtractor;
     private final SpanStatusExtractor<RequestAndRoute, RestResponse> httpSpanStatusExtractor;
 
-    public HttpServerTracing(ThreadContext threadContext, APMTracer tracer) {
+    public HttpServerTracing(ThreadContext threadContext, APMTracingService tracingService) {
         this.threadContext = threadContext;
-        this.tracer = tracer;
+        this.tracer = tracingService.tracer("elasticsearch.http");
 
         this.getter = new OtelAttributesGetter();
         this.spanNameExtractor = HttpSpanNameExtractor.create(getter);

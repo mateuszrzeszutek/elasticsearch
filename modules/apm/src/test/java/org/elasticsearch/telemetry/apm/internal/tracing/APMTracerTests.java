@@ -89,6 +89,8 @@ public class APMTracerTests extends ESTestCase {
         }
     };
 
+    private static final String scopeName = "test.scope";
+
     private final ThreadContext threadContext = new ThreadContext(Settings.EMPTY);
     private final InMemorySpanExporter exporter = InMemorySpanExporter.create();
     private TracingSettingsUpdater settingsUpdater;
@@ -890,7 +892,7 @@ public class APMTracerTests extends ESTestCase {
         );
         settingsUpdater = new TracingSettingsUpdater(service, allSampled);
         service.start();
-        return service.tracer();
+        return service.tracer(scopeName);
     }
 
     private static void startAndEnd(Tracer tracer, String name) {

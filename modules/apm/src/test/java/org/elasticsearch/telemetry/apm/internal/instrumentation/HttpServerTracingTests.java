@@ -20,6 +20,7 @@ import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.tasks.Task;
+import org.elasticsearch.telemetry.apm.internal.APMTracingService;
 import org.elasticsearch.telemetry.apm.internal.tracing.APMSpanBuilder;
 import org.elasticsearch.telemetry.apm.internal.tracing.APMTracer;
 import org.elasticsearch.telemetry.apm.internal.tracing.AbstractSpan;
@@ -56,7 +57,13 @@ public class HttpServerTracingTests extends ESTestCase {
     final AttributesBuilder extractedAttributes = Attributes.builder();
     final ThreadContext.StoredContext storedContext = mock(ThreadContext.StoredContext.class);
     final ThreadContext threadContext = new ThreadContext(Settings.EMPTY);
-    final HttpServerTracing instrumentation = new HttpServerTracing(threadContext, tracer);
+    final APMTracingService tracingService = mock(APMTracingService.class);
+    final HttpServerTracing instrumentation = newInstrumentation();
+
+    private HttpServerTracing newInstrumentation() {
+        when(tracingService.tracer("elasticsearch.http")).thenReturn(tracer);
+        return new HttpServerTracing(threadContext, tracingService);
+    }
 
     public HttpServerTracingTests() {
         when(tracer.spanBuilder("GET /{index}/_search")).thenReturn(spanBuilder);
