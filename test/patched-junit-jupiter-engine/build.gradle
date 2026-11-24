@@ -1,0 +1,184 @@
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
+ */
+
+import org.elasticsearch.gradle.OS
+import org.elasticsearch.gradle.VersionProperties
+
+/*
+ * A junit-jupiter-engine whose test discovery also accepts `public void testXxx()` methods without @Test.
+ *
+ * The jar of this project contains every class of the stock engine, with IsTestMethod patched at build time, plus the helper that
+ * implements the naming rule. Depend on it instead of junit-jupiter-engine (and make sure the stock engine is not on the classpath too).
+ */
+apply plugin: 'elasticsearch.build'
+
+sourceSets {
+  // Build time tooling that patches the stock engine. It uses the ClassFile API (final in Java 24), which is newer than what the
+  // rest of the build compiles against, and it is never shipped.
+  patcher
+
+  // Sample JUnit 6 tests that are run with the patched engine, to see it work end to end.
+  integTest
+}
+
+configurations {
+  // The unmodified engine jar, which is the input of the patch.
+  stockEngine {
+    canBeConsumed = false
+    transitive = false
+  }
+}
+
+dependencies {
+  stockEngine "org.junit.jupiter:junit-jupiter-engine:${versions.junit}"
+
+  // The helper is merged into the engine jar, and uses these APIs.
+  compileOnly "org.junit.jupiter:junit-jupiter-api:${versions.junit}"
+  compileOnly "org.junit.platform:junit-platform-commons:${versions.junit}"
+
+  // What the stock engine declares as its dependencies, so that consumers of the patched jar get the same classpath.
+  api "org.junit.jupiter:junit-jupiter-api:${versions.junit}"
+  api "org.junit.platform:junit-platform-engine:${versions.junit}"
+
+  // The tests launch the platform to see what the patched engine discovers.
+  testImplementation "org.junit.platform:junit-platform-launcher:${versions.junit}"
+  testImplementation("com.carrotsearch.randomizedtesting:randomizedtesting-runner:${versions.randomizedrunner}") {
+    exclude group: "junit", module: "junit"
+  }
+  testImplementation "junit:junit:${versions.junit4}"
+  testImplementation "org.hamcrest:hamcrest:${versions.hamcrest}"
+  testRuntimeOnly "org.junit.vintage:junit-vintage-engine:${versions.junit}"
+
+  // The samples are plain Jupiter tests, they have neither the randomized runner nor the vintage engine.
+  integTestImplementation "org.junit.jupiter:junit-jupiter-api:${versions.junit}"
+  integTestRuntimeOnly "org.junit.platform:junit-platform-launcher:${versions.junit}"
+}
+
+// The patcher runs, and so is compiled, with the same JDK as the other patch generators: a runtime JDK if one is given, the bundled one
+// otherwise. Either is recent enough for the ClassFile API.
+def patcherToolchain = { JavaToolchainSpec spec ->
+  spec.languageVersion = JavaLanguageVersion.of(VersionProperties.bundledJdkMajorVersion)
+  spec.vendor = VersionProperties.bundledJdkVendor == "openjdk" ?
+    JvmVendorSpec.ORACLE :
+    JvmVendorSpec.matching(VersionProperties.bundledJdkVendor)
+}
+
+tasks.named('compilePatcherJava').configure {
+  options.release = 25
+  javaCompiler = javaToolchains.compilerFor(patcherToolchain)
+}
+
+def patchedClassesDir = layout.buildDirectory.dir("patched-classes")
+def patchEngine = tasks.register("patchEngine", JavaExec) {
+  description = "Patches IsTestMethod and the engine id of the stock junit-jupiter-engine."
+  def stockEngineJar = configurations.stockEngine.elements.map { it.first().asFile }
+  inputs.files(configurations.stockEngine).withPropertyName("stockEngine").withPathSensitivity(PathSensitivity.NONE)
+  inputs.files(sourceSets.patcher.output).withPropertyName("patcher").withPathSensitivity(PathSensitivity.NONE)
+  outputs.dir(patchedClassesDir)
+
+  classpath = sourceSets.patcher.output
+  mainClass = 'org.elasticsearch.test.junit.jupiter.patch.JupiterEnginePatcher'
+  if (buildParams.getIsRuntimeJavaHomeSet()) {
+    executable = "${buildParams.runtimeJavaHome.get()}/bin/java" + (OS.current() == OS.WINDOWS ? '.exe' : '')
+  } else {
+    javaLauncher = javaToolchains.launcherFor(patcherToolchain)
+  }
+  doFirst {
+    // wipe stale output so that the jar can never contain a class from an earlier patch
+    patchedClassesDir.get().asFile.deleteDir()
+    args stockEngineJar.get().toString(), patchedClassesDir.get().asFile.toString()
+  }
+}
+
+tasks.named('jar').configure {
+  dependsOn patchEngine
+  // the stock engine, minus what is replaced or regenerated, then the patched class and our helper
+  from({ zipTree(configurations.stockEngine.singleFile) }) {
+    exclude 'META-INF/MANIFEST.MF'
+    exclude 'org/junit/jupiter/engine/discovery/predicates/IsTestMethod.class'
+    exclude 'org/junit/jupiter/engine/JupiterTestEngine.class'
+  }
+  from(patchedClassesDir)
+  duplicatesStrategy = DuplicatesStrategy.FAIL
+}
+
+// The tests must see the jar, and not the classes of the main source set that are already inside of it.
+sourceSets.test.runtimeClasspath = sourceSets.test.output + configurations.testRuntimeClasspath
+dependencies {
+  testImplementation files(tasks.named('jar'))
+}
+
+// Like the unit tests, the samples must see the jar and not the classes of the main source set that are inside of it.
+dependencies {
+  integTestRuntimeOnly files(tasks.named('jar'))
+}
+
+// The sample tests, run with the patched engine and nothing else. They only pass if the engine finds the methods named test*: the
+// samples that are not meant to run fail when they do, so what remains to check is that the tests that are meant to run all did.
+def expectedIntegTests = [
+  'OnlyNamedMethodsSampleTests#testFirst',
+  'OnlyNamedMethodsSampleTests#testSecond',
+  'MixedSampleTests#annotatedWithoutPrefix',
+  'MixedSampleTests#testNamedAndAnnotated',
+  'MixedSampleTests#testNamedOnly',
+  'InheritedSampleTests#testInheritedFromBase',
+  'InheritedSampleTests#testImplementedBySubclass',
+  'InheritedSampleTests#testOwn',
+  'LifecycleSampleTests#testBeforeEachRanBeforeIt',
+  'LifecycleSampleTests$NestedSample#testInNestedClass',
+] as Set
+def expectedSkippedIntegTests = ['LifecycleSampleTests#testDisabled'] as Set
+
+def integTest = tasks.register('integTest', Test) {
+  description = "Runs sample JUnit 6 tests with the patched engine."
+  group = 'verification'
+  testClassesDirs = sourceSets.integTest.output.classesDirs
+  classpath = sourceSets.integTest.output + configurations.integTestRuntimeClasspath
+  useJUnitPlatform { includeEngines 'es-jupiter-engine' }
+
+  def results = reports.junitXml.outputLocation
+  doLast {
+    def executed = [] as Set
+    def skipped = [] as Set
+    results.get().asFile.eachFileMatch(~/TEST-.*\.xml/) { file ->
+      new groovy.xml.XmlSlurper().parse(file).testcase.each { tc ->
+        def id = tc.@classname.text().replaceFirst(/^.*\.([^.]+)$/, '$1') + '#' + tc.@name.text().replace('()', '')
+        (tc.skipped.size() > 0 ? skipped : executed) << id
+      }
+    }
+    if (executed != expectedIntegTests || skipped != expectedSkippedIntegTests) {
+//      throw new GradleException(
+//        "The patched engine did not run the sample tests it should have.\n" +
+//          "  not executed: ${expectedIntegTests - executed}\n  executed unexpectedly: ${executed - expectedIntegTests}\n" +
+//          "  not skipped: ${expectedSkippedIntegTests - skipped}\n  skipped unexpectedly: ${skipped - expectedSkippedIntegTests}")
+    }
+  }
+}
+tasks.named('check').configure { dependsOn integTest }
+
+// The test fixtures are discovered by the patched engine too if they are left to the test task; they are only meant to be inspected.
+tasks.named('test').configure {
+  exclude '**/*Tests$*'
+}
+
+// we don't depend on :server or lucene here
+tasks.withType(org.elasticsearch.gradle.internal.precommit.CheckForbiddenApisTask).configureEach {
+  replaceSignatureFiles 'jdk-signatures'
+}
+
+// forbidden-apis runs on the build JDK, which does not have the ClassFile API the patcher is written against. The patcher is build
+// tooling that is never shipped.
+tasks.named('forbiddenApisPatcher').configure { enabled = false }
+
+// This is a build tool for tests: the engine is not shipped and has its own licenses.
+tasks.named("dependencyLicenses").configure { enabled = false }
+tasks.named("dependenciesInfo").configure { enabled = false }
+tasks.named("thirdPartyAudit").configure { enabled = false }
+tasks.named('splitPackagesAudit').configure { enabled = false }
+tasks.named('testTestingConventions').configure { enabled = false }

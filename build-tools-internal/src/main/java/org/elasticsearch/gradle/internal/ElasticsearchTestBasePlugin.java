@@ -80,7 +80,7 @@ public abstract class ElasticsearchTestBasePlugin implements Plugin<Project> {
         final boolean isCi = buildParams.get().getCi();
 
         project.getTasks().withType(Test.class).configureEach(test -> {
-            test.useJUnitPlatform();
+            test.useJUnitPlatform(options -> options.excludeEngines("junit-jupiter"));
 
             File testOutputDir = new File(test.getReports().getJunitXml().getOutputLocation().getAsFile().get(), "output");
             test.getReports().getHtml().getRequired().set(isCi == false);
