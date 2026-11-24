@@ -118,6 +118,8 @@ List projects = [
   'server',
   'test:vintage-randomized-runner',
   'test:framework',
+  'test:framework-jupiter',
+  'test:framework-jupiter-agent',
   'test:fixtures:aws-ec2-fixture',
   'test:fixtures:aws-fixture-utils',
   'test:fixtures:aws-sts-fixture',

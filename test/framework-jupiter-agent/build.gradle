@@ -1,0 +1,64 @@
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
+ */
+
+/*
+ * The -javaagent that makes the Jupiter tests that extend ElasticsearchTest run their public void testXxx() methods without @Test.
+ * It is applied to the forked test JVMs, which run on the runtime JDK, so it uses ASM rather than the ClassFile API: the ClassFile
+ * API is not available on the oldest JDK that tests are run on.
+ */
+apply plugin: 'elasticsearch.build'
+apply plugin: 'com.gradleup.shadow'
+
+dependencies {
+  implementation 'org.ow2.asm:asm:9.11.1'
+  implementation 'org.ow2.asm:asm-tree:9.11.1'
+
+  // the transformer is only tested on classes that use the annotations it looks for
+  testImplementation "org.junit.jupiter:junit-jupiter-api:${versions.junit}"
+  testImplementation("com.carrotsearch.randomizedtesting:randomizedtesting-runner:${versions.randomizedrunner}") {
+    exclude group: "junit", module: "junit"
+  }
+  testImplementation "junit:junit:${versions.junit4}"
+  testImplementation "org.hamcrest:hamcrest:${versions.hamcrest}"
+  testRuntimeOnly "org.junit.vintage:junit-vintage-engine:${versions.junit}"
+  testRuntimeOnly "org.junit.platform:junit-platform-launcher:${versions.junit}"
+}
+
+def agentManifest = [
+  'Premain-Class'           : 'org.elasticsearch.test.jupiter.agent.TestMethodAgent',
+  'Can-Redefine-Classes'    : 'false',
+  'Can-Retransform-Classes' : 'false'
+]
+
+tasks.named('shadowJar').configure {
+  // Elasticsearch builds drop the classifier of jars, which would make this the same file as the plain jar. The tests of this module
+  // run on the plain one, and need the real ASM that comes with it.
+  archiveClassifier = 'agent'
+  // the agent lives in the class path of the application, next to the ASM that Elasticsearch itself has, so it keeps its own
+  relocate 'org.objectweb.asm', 'org.elasticsearch.test.jupiter.agent.asm'
+  manifest { attributes(agentManifest) }
+}
+
+// The shadow plugin makes the shaded jar the runtime artifact of this project, and that has the relocated ASM. The unit tests look at
+// class files with ASM, so they run on the classes of the agent and the real ASM instead.
+tasks.named('test').configure {
+  classpath = sourceSets.test.output + sourceSets.main.output + configurations.testRuntimeClasspath
+}
+
+// we don't depend on :server or lucene here
+tasks.withType(org.elasticsearch.gradle.internal.precommit.CheckForbiddenApisTask).configureEach {
+  replaceSignatureFiles 'jdk-signatures'
+}
+
+// the agent is only ever used by tests: nothing of it is shipped
+tasks.named("dependencyLicenses").configure { enabled = false }
+tasks.named("dependenciesInfo").configure { enabled = false }
+tasks.named("thirdPartyAudit").configure { enabled = false }
+tasks.named('splitPackagesAudit').configure { enabled = false }
+tasks.named('testTestingConventions').configure { enabled = false }
